@@ -1,0 +1,79 @@
+name: Build APK
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.ref_name, 'gh-pages-') }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.0"
+          channel: "stable"
+          cache: true
+
+      - name: Generate Android/iOS boilerplate
+        shell: bash
+        run: |
+          mkdir -p /tmp/keep
+          cp pubspec.yaml /tmp/keep/pubspec.yaml
+          cp -r lib /tmp/keep/lib
+
+          flutter create --platforms=android --org com.web2apk --project-name webview_app .
+
+          cp /tmp/keep/pubspec.yaml pubspec.yaml
+          cp -r /tmp/keep/lib/* lib/
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Determine build type from branch name
+        id: buildtype
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *"-debug" ]]; then
+            echo "type=debug" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=release" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build APK (release)
+        if: steps.buildtype.outputs.type == 'release'
+        run: flutter build apk --release
+
+      - name: Build APK (debug)
+        if: steps.buildtype.outputs.type == 'debug'
+        run: flutter build apk --debug
+
+      - name: Collect APK into a clean folder
+        shell: bash
+        run: |
+          mkdir -p release-output
+          if [ "${{ steps.buildtype.outputs.type }}" = "debug" ]; then
+            cp build/app/outputs/flutter-apk/app-debug.apk release-output/app-release.apk
+          else
+            cp build/app/outputs/flutter-apk/app-release.apk release-output/app-release.apk
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: release-output/app-release.apk
+          retention-days: 1
